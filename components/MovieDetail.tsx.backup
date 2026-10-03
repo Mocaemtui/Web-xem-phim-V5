@@ -1,0 +1,860 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { motion, useScroll, useTransform } from "framer-motion";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Play, Share2, Plus, Clock, Calendar, Star, Languages, Users, Heart } from "lucide-react";
+import type { MovieDetail, MovieImages, MoviePeoples } from "@/types/api";
+import ImageToggle from "./ImageToggle";
+import YouTube from "react-youtube";
+import { getWatchHistory } from "@/lib/watchHistory";
+import { useSession } from "next-auth/react";
+import AuthModal from "./AuthModal";
+
+import { getPosterUrl, getBackdropUrl, resolveImgUrl, sortEpisodes, getCleanServerName } from "@/lib/api";
+
+
+import { TMDBDetailResponse, TMDBCollectionDetail } from "@/types/tmdb";
+
+interface MovieDetailProps {
+  movie: MovieDetail;
+  images: MovieImages;
+  peoples: MoviePeoples;
+  tmdbData?: TMDBDetailResponse | null;
+  tmdbCollectionData?: TMDBCollectionDetail | null;
+}
+
+export default function MovieDetail({ movie, images, peoples, tmdbData, tmdbCollectionData }: MovieDetailProps) {
+  // 0 = Primary, 1 = TMDB, 2 = Alternate
+  const [backdropSource, setBackdropSource] = useState<0 | 1 | 2>(0);
+  const [posterSource, setPosterSource] = useState<0 | 1 | 2>(0);
+  const [isPlayingTrailer, setIsPlayingTrailer] = useState(false);
+  const [isVideoReady, setIsVideoReady] = useState(false);
+  const [trailerVideoId, setTrailerVideoId] = useState<string | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
+  const [selectedServerIndex, setSelectedServerIndex] = useState(0);
+  
+  const { data: session } = useSession();
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [isBookmarked, setIsBookmarked] = useState(false);
+  const [isLoadingBookmark, setIsLoadingBookmark] = useState(false);
+  const [showAllReviews, setShowAllReviews] = useState(false);
+
+  useEffect(() => {
+    if (session?.user && movie.slug) {
+      fetch("/api/bookmarks")
+        .then(res => res.json())
+        .then(data => {
+          if (data.bookmarks && data.bookmarks.includes(movie.slug)) {
+            setIsBookmarked(true);
+          }
+        })
+        .catch(console.error);
+    }
+  }, [session, movie.slug]);
+
+  const toggleBookmark = async () => {
+    if (!session?.user) {
+      setAuthModalOpen(true);
+      return;
+    }
+    
+    setIsLoadingBookmark(true);
+    try {
+      const res = await fetch("/api/bookmarks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug: movie.slug })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setIsBookmarked(data.isBookmarked);
+      }
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsLoadingBookmark(false);
+    }
+  };
+
+  // Parallax effect
+  const { scrollY } = useScroll();
+  const y = useTransform(scrollY, [0, 800], [0, -100]);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  useEffect(() => {
+    // Prioritize TMDB Trailer
+    let tmdbTrailerId = null;
+    if (tmdbData?.videos?.results) {
+      // Find official trailer first, if not find any trailer
+      let trailer = tmdbData.videos.results.find(v => v.type === "Trailer" && v.site === "YouTube" && v.official);
+      if (!trailer) {
+        trailer = tmdbData.videos.results.find(v => v.type === "Trailer" && v.site === "YouTube");
+      }
+      if (trailer) tmdbTrailerId = trailer.key;
+    }
+
+    if (tmdbTrailerId) {
+      setTrailerVideoId(tmdbTrailerId);
+      return;
+    }
+
+    if (!movie.trailer_url) return;
+    let videoId = "";
+    const url = movie.trailer_url;
+    if (url.includes("youtube.com/watch?v=")) {
+      videoId = url.split("v=")[1].split("&")[0];
+    } else if (url.includes("youtu.be/")) {
+      videoId = url.split("youtu.be/")[1].split("?")[0];
+    } else if (url.includes("youtube.com/embed/")) {
+      videoId = url.split("embed/")[1].split("?")[0];
+    }
+    if (videoId) setTrailerVideoId(videoId);
+  }, [movie.trailer_url, tmdbData]);
+
+  const primaryPosterUrl = getBackdropUrl(movie);
+  const primaryThumbUrl = getPosterUrl(movie);
+  
+  // Alternate URLs (from fallback/secondary API)
+  const altPosterUrl = movie.alt_poster_url ? resolveImgUrl(movie.alt_poster_url) : null;
+  const altThumbUrl = movie.alt_thumb_url ? resolveImgUrl(movie.alt_thumb_url) : null;
+
+  // TMDB URLs
+  const tmdbPosterFile = images?.images?.find(img => img.type === 'poster')?.file_path;
+  const tmdbPosterBase = images?.image_sizes?.poster?.w500 || "https://image.tmdb.org/t/p/w500";
+  const tmdbPosterUrl = tmdbPosterFile ? `${tmdbPosterBase}${tmdbPosterFile}` : null;
+
+  let tmdbBackdropUrl = null;
+  if (tmdbData?.backdrop_path) {
+    tmdbBackdropUrl = `https://image.tmdb.org/t/p/original${tmdbData.backdrop_path}`;
+  } else {
+    const tmdbBackdropFile = images?.images?.find(img => img.type === 'backdrop')?.file_path;
+    const tmdbBackdropBase = images?.image_sizes?.backdrop?.w1280 || "https://image.tmdb.org/t/p/w1280";
+    tmdbBackdropUrl = tmdbBackdropFile ? `${tmdbBackdropBase}${tmdbBackdropFile}` : null;
+  }
+
+
+  // Determine available options
+  const hasAltBackdrop = Boolean(altPosterUrl && altPosterUrl !== primaryPosterUrl);
+  const hasAltPoster = Boolean(altThumbUrl && altThumbUrl !== primaryThumbUrl);
+
+  const availableBackdrops = [primaryPosterUrl];
+  const backdropNames = ["PhimAPI"];
+  if (tmdbBackdropUrl) {
+    availableBackdrops.push(tmdbBackdropUrl);
+    backdropNames.push("TMDB");
+  }
+  if (hasAltBackdrop) {
+    availableBackdrops.push(altPosterUrl!);
+    backdropNames.push("Ophim");
+  }
+
+  const availablePosters = [primaryThumbUrl];
+  const posterNames = ["PhimAPI"];
+  if (tmdbPosterUrl) {
+    availablePosters.push(tmdbPosterUrl);
+    posterNames.push("TMDB");
+  }
+  if (hasAltPoster) {
+    availablePosters.push(altThumbUrl!);
+    posterNames.push("Ophim");
+  }
+
+  // Current active images
+  const currentBackdropIndex = backdropSource % availableBackdrops.length;
+  const currentPosterIndex = posterSource % availablePosters.length;
+  const currentBackdropUrl = availableBackdrops[currentBackdropIndex];
+  const currentPosterUrl = availablePosters[currentPosterIndex];
+  const currentBackdropName = backdropNames[currentBackdropIndex];
+  const currentPosterName = posterNames[currentPosterIndex];
+
+  // Transition states
+  const [backdropFade, setBackdropFade] = useState(true);
+  const [posterFade, setPosterFade] = useState(true);
+
+  // Handle transitions smoothly
+  const toggleBackdrop = () => {
+    setBackdropFade(false);
+    setTimeout(() => {
+      setBackdropSource(prev => ((prev + 1) % availableBackdrops.length) as 0 | 1 | 2);
+      setBackdropFade(true);
+    }, 250);
+  };
+
+  const togglePoster = () => {
+    setPosterFade(false);
+    setTimeout(() => {
+      setPosterSource(prev => ((prev + 1) % availablePosters.length) as 0 | 1 | 2);
+      setPosterFade(true);
+    }, 250);
+  };
+
+  const handleBackdropError = () => {
+    if (backdropSource < availableBackdrops.length - 1) {
+      setBackdropSource(prev => (prev + 1) as 0 | 1 | 2);
+    }
+  };
+
+  const handlePosterError = () => {
+    if (posterSource < availablePosters.length - 1) {
+      setPosterSource(prev => (prev + 1) as 0 | 1 | 2);
+    }
+  };
+
+
+
+  const router = useRouter();
+  
+  const handleBack = () => {
+    if (typeof window !== 'undefined') {
+      const lastBrowse = sessionStorage.getItem("last_browse_page");
+      if (lastBrowse) {
+        router.push(lastBrowse);
+        return;
+      }
+    }
+    router.push("/");
+  };
+
+  const [historyItem, setHistoryItem] = useState<any>(null);
+  const [episodes, setEpisodes] = useState(sortEpisodes(movie.episodes || []));
+  const [currentOriginName, setCurrentOriginName] = useState(movie.origin_name);
+  const [watchedEpisodes, setWatchedEpisodes] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const history = getWatchHistory();
+    const item = history.find((i: any) => i.slug === movie.slug);
+    setHistoryItem(item || null);
+    
+    const sortedEps = sortEpisodes(movie.episodes || []);
+    setEpisodes(sortedEps);
+    setCurrentOriginName(movie.origin_name);
+
+    let initialServer = 0;
+    if (item && item.currentServerIndex !== undefined && sortedEps[item.currentServerIndex]) {
+      initialServer = item.currentServerIndex;
+    }
+    setSelectedServerIndex(initialServer);
+
+    try {
+      const stored = localStorage.getItem("watched_episodes_v3");
+      if (stored) {
+        setWatchedEpisodes(new Set(JSON.parse(stored)));
+      }
+    } catch {}
+  }, [movie.slug, movie.origin_name, movie.episodes]);
+
+
+
+
+  return (
+    <div className="min-h-screen bg-zinc-950">
+      <AuthModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} />
+      {/* Top Bar with Back Button */}
+      <div className="fixed top-[76px] left-4 z-40 pointer-events-none flex items-start">
+        <button 
+          onClick={handleBack}
+          className="pointer-events-auto opacity-100 md:opacity-0 md:hover:opacity-100 bg-black/60 hover:bg-black/90 text-white p-2 rounded-full backdrop-blur-md transition-all border border-white/10 shadow-lg hover:scale-105 active:scale-95 duration-300"
+          title="Quay lại"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+      </div>
+      {/* Backdrop */}
+      <div className="relative z-0 w-full aspect-video overflow-hidden bg-zinc-950">
+        
+        <div className="absolute inset-0 z-0">
+          {/* Youtube Background - clip-path giấu hoàn toàn cho tới khi video phát */}
+        {isPlayingTrailer && trailerVideoId && (
+          <div 
+            className="absolute inset-0 z-0 bg-black"
+            style={{
+              clipPath: isVideoReady ? 'inset(0)' : 'inset(100%)',
+              opacity: isVideoReady ? 1 : 0
+            }}
+          >
+              <YouTube
+                videoId={trailerVideoId}
+                opts={{
+                  height: '100%',
+                  width: '100%',
+                  playerVars: {
+                    autoplay: 1,
+                    controls: 0,
+                    modestbranding: 1,
+                    loop: 1,
+                    playlist: trailerVideoId,
+                    playsinline: 1,
+                    rel: 0,
+                    disablekb: 1,
+                    iv_load_policy: 3,
+                    vq: 'hd1080'
+                  }
+                }}
+                onReady={(e) => {
+                  e.target.setPlaybackQuality('hd1080');
+                }}
+                onPlay={(e) => {
+                  e.target.setPlaybackQuality('hd1080');
+                  setIsVideoReady(true);
+                }}
+                className="absolute inset-0 w-full h-full pointer-events-none"
+              />
+            {/* Click to stop trailer */}
+            <div 
+              className="absolute inset-0 z-30 cursor-pointer" 
+              onClick={() => {
+                setIsPlayingTrailer(false);
+                setIsVideoReady(false);
+              }}
+            />
+          </div>
+        )}
+
+        {/* Bức ảnh nền (Biến mất lập tức khi video chạy) */}
+        <div className={`absolute inset-0 z-10 ${isVideoReady ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+          <img
+            src={currentBackdropUrl}
+            alt={movie.name}
+            className={`absolute inset-0 z-0 w-full h-full object-cover transition-opacity duration-1000 ease-in-out cursor-pointer md:cursor-default ${backdropFade ? "opacity-100" : "opacity-0"}`}
+            onClick={() => { if (window.innerWidth < 768 && availableBackdrops.length > 1) toggleBackdrop(); }}
+            onError={handleBackdropError}
+          />
+          
+          {/* Nút Play ẩn - chỉ hiện khi đưa chuột vào đúng vùng giữa ảnh */}
+          {trailerVideoId && !isPlayingTrailer && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+              <div 
+                className="w-24 h-24 pointer-events-auto cursor-pointer flex items-center justify-center group/play"
+                onClick={() => setIsPlayingTrailer(true)}
+              >
+                <div className="w-16 h-16 md:w-20 md:h-20 bg-white/20 md:bg-white/10 group-hover/play:bg-[var(--color-cyan-neon)] rounded-full flex items-center justify-center backdrop-blur-sm shadow-[0_0_20px_rgba(255,255,255,0.2)] group-hover/play:shadow-[0_0_50px_var(--color-cyan-neon)] transition-all duration-300 text-white/80 md:text-white/30 group-hover/play:text-black opacity-100 md:opacity-0 group-hover/play:opacity-100 scale-100 md:scale-75 group-hover/play:scale-100">
+                  <svg className="w-8 h-8 md:w-10 md:h-10 translate-x-[2px]" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+        </div>
+        
+        {/* Cinematic Gradients - keep outside parallax to maintain overlay structure */}
+        <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/50 via-zinc-950/10 to-transparent pointer-events-none z-20" />
+        <div className="absolute inset-0 bg-gradient-to-r from-zinc-950/30 via-transparent to-transparent pointer-events-none z-20" />
+
+        {availableBackdrops.length > 1 && (
+          <div className="hidden md:flex absolute top-0 right-0 w-48 h-48 z-30 group/corner items-start justify-end p-4">
+            <div className="opacity-0 invisible group-hover/corner:opacity-100 group-hover/corner:visible pointer-events-none group-hover/corner:pointer-events-auto transition-all duration-300">
+              <ImageToggle onToggle={toggleBackdrop} label={`Đổi ảnh nền (Nguồn: ${currentBackdropName})`} />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Content */}
+      <motion.div 
+        style={{ y: isMobile ? 0 : y }}
+        className="max-w-[1600px] mx-auto px-4 md:px-6 relative z-10 -mt-20 md:-mt-32 pb-12"
+      >
+        {/* Main Info Grid */}
+        <div className="grid grid-cols-[110px_1fr] md:grid-cols-[300px_1fr] lg:grid-cols-[400px_1fr] gap-4 md:gap-12">
+          
+          {/* Poster - Left Column */}
+          <div className="col-span-1 row-span-1 md:row-span-2">
+            <Link href={`/xem-phim/${movie.slug}`} className="block relative aspect-[2/3] rounded-xl overflow-hidden shadow-[0_0_20px_rgba(0,0,0,0.6)] md:shadow-[0_0_30px_rgba(0,0,0,0.8)] group bg-zinc-900 transition-transform duration-300 md:hover:scale-105 border border-white/10 hover:border-[var(--color-cyan-neon)]">
+              <img
+                src={currentPosterUrl}
+                alt={movie.name}
+                className={`w-full h-full object-cover transition-opacity duration-300 ease-in-out ${posterFade ? "opacity-100" : "opacity-0"}`}
+                onError={handlePosterError}
+              />
+
+              {availablePosters.length > 1 && (
+                <div className="absolute top-3 right-3 z-30 opacity-0 group-hover:opacity-100 invisible group-hover:visible pointer-events-none group-hover:pointer-events-auto transition-all duration-300">
+                  <ImageToggle onToggle={togglePoster} label={`Đổi ảnh poster (Nguồn: ${currentPosterName})`} />
+                </div>
+              )}
+            </Link>
+          </div>
+
+          {/* Title and Mobile Actions */}
+          <div className="col-start-2 flex flex-col justify-start min-w-0">
+            <h1 className="text-lg sm:text-2xl md:text-4xl font-bold text-white mb-1 md:mb-2 line-clamp-3 md:line-clamp-none leading-snug md:leading-tight break-words">
+              {movie.origin_name || movie.name}
+            </h1>
+            {movie.origin_name && (
+              <p className="text-xs md:text-lg text-zinc-400 font-medium truncate md:whitespace-normal mb-2 break-words">{movie.name}</p>
+            )}
+
+            {/* Ratings */}
+            <div className="flex flex-wrap items-center gap-4 mb-4">
+              {/* TMDB Rating */}
+              {tmdbData && tmdbData.vote_average > 0 && (
+                <div className="flex items-center gap-2 bg-zinc-900/60 border border-zinc-800/50 px-3 py-1.5 rounded-xl backdrop-blur-sm">
+                  <Star className="w-5 h-5 text-emerald-400 fill-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.4)]" />
+                  <span className="text-white font-bold text-lg">{tmdbData.vote_average.toFixed(1)}<span className="text-zinc-400 text-sm font-normal">/10</span></span>
+                  <span className="text-zinc-500 text-sm">({tmdbData.vote_count.toLocaleString()} TMDB)</span>
+                </div>
+              )}
+              
+              {/* IMDB Rating */}
+              {movie.imdb && movie.imdb.vote_average > 0 && (
+                <div className="flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/20 px-3 py-1.5 rounded-xl backdrop-blur-sm">
+                  <div className="bg-yellow-500 text-black font-black text-xs px-1.5 py-0.5 rounded-sm tracking-tighter">IMDb</div>
+                  <span className="text-white font-bold text-lg">{movie.imdb.vote_average.toFixed(1)}<span className="text-zinc-400 text-sm font-normal">/10</span></span>
+                  <span className="text-zinc-500 text-sm">({movie.imdb.vote_count.toLocaleString()} đánh giá)</span>
+                </div>
+              )}
+            </div>
+
+            {/* Info Container (Full width on mobile, right column on desktop) */}
+          <div className="col-span-2 md:col-span-1 md:col-start-2 flex flex-col gap-4 md:gap-6 pt-1 md:pt-0 min-w-0">
+            {/* Meta Info */}
+            <div className="flex flex-wrap gap-3 text-sm md:text-base font-medium">
+              <span className="px-4 py-1.5 bg-zinc-800/80 text-zinc-200 rounded-full border border-zinc-700/50">
+                {movie.year}
+              </span>
+              {movie.quality && (
+                <span className="px-4 py-1.5 bg-zinc-800/80 text-zinc-200 rounded-full border border-zinc-700/50">
+                  {movie.quality}
+                </span>
+              )}
+              {movie.lang && (
+                <span className="px-4 py-1.5 bg-zinc-800/80 text-zinc-200 rounded-full border border-zinc-700/50">
+                  {movie.lang}
+                </span>
+              )}
+              {movie.time && (
+                <span className="px-4 py-1.5 bg-zinc-800/80 text-zinc-200 rounded-full border border-zinc-700/50">
+                  {movie.time}
+                </span>
+              )}
+            </div>
+
+            {/* Categories */}
+            {movie.category && movie.category.length > 0 && (
+              <div className="flex flex-wrap gap-2 items-center">
+                <span className="text-zinc-400 font-medium text-sm">Thể loại:</span>
+                {movie.category.map((cat, index) => (
+                  <div
+                    key={`${cat.id || cat.slug}-${index}`}
+                    className="inline-flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800/80 border border-zinc-800 rounded-full px-3 py-1 text-sm transition-colors text-zinc-300"
+                  >
+                    <Link
+                      href={`/filter?theLoai=${cat.slug}`}
+                      className="text-blue-400 hover:text-blue-300 hover:underline"
+                    >
+                      {cat.name}
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            )}
+
+
+
+            {/* Countries */}
+            {movie.country && movie.country.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {movie.country.map((country, index) => (
+                  <span
+                    key={`${country.id || country.slug}-${index}`}
+                    className="text-sm text-zinc-400"
+                  >
+                    {country.name}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Mobile Action Buttons */}
+            {episodes && 
+            episodes.length > 0 && 
+            episodes[0].server_data && 
+            episodes[0].server_data.length > 0 &&
+            (episodes[0].server_data[0].link_m3u8 || episodes[0].server_data[0].link_embed) && (
+              <div className="md:hidden flex flex-col gap-2 w-full mt-auto pb-1">
+                {movie.slug && (
+                  <Link
+                    href={`/xem-phim/${movie.slug}`}
+                    className="inline-flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white font-semibold text-sm py-2.5 rounded-xl transition-all active:scale-95 shadow-lg shadow-red-950/40 w-full"
+                  >
+                    <Play className="w-4 h-4 fill-current" />
+                    <span>Xem ngay</span>
+                  </Link>
+                )}
+                
+                <div className="flex gap-2 items-center w-full">
+                  {movie.slug && (
+                    <button
+                      onClick={() => {
+                        const roomId = Math.random().toString(36).substring(2, 9);
+                        sessionStorage.setItem(`host_${roomId}`, 'true');
+                        window.location.href = `/watch-together/${movie.slug}/${roomId}`;
+                      }}
+                      className="flex-1 inline-flex items-center justify-center gap-2 bg-zinc-900 hover:bg-zinc-855 text-white font-semibold text-sm py-2.5 rounded-xl transition-colors border border-zinc-800 active:scale-95 cursor-pointer h-10"
+                    >
+                      <Users className="w-4 h-4 text-blue-400" />
+                      <span>Xem chung</span>
+                    </button>
+                  )}
+                  {movie.slug && (
+                    <button
+                      onClick={toggleBookmark}
+                      disabled={isLoadingBookmark}
+                      className={`flex-1 inline-flex items-center justify-center gap-2 font-semibold text-sm py-2.5 rounded-xl transition-colors border active:scale-95 cursor-pointer h-10 ${
+                        isBookmarked 
+                          ? 'bg-pink-500/10 border-pink-500/50 text-pink-500 hover:bg-pink-500/20' 
+                          : 'bg-zinc-900 hover:bg-zinc-855 text-zinc-300 border-zinc-800'
+                      }`}
+                    >
+                      <Heart className={`w-4 h-4 ${isBookmarked ? 'fill-current' : ''}`} />
+                      <span>{isBookmarked ? 'Đã lưu' : 'Lưu'}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Desktop Action Buttons */}
+            {episodes && 
+            episodes.length > 0 && 
+            episodes[0].server_data && 
+            episodes[0].server_data.length > 0 &&
+            (episodes[0].server_data[0].link_m3u8 || episodes[0].server_data[0].link_embed) ? (
+              <div className="hidden md:flex flex-wrap gap-3 mt-4 items-center">
+                {movie.slug && (
+                  <Link
+                    href={`/xem-phim/${movie.slug}`}
+                    className="inline-flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white font-medium px-6 py-2.5 rounded-lg transition-colors w-fit shadow-lg shadow-red-900/20 active:scale-95"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Xem ngay
+                  </Link>
+                )}
+                {movie.slug && (
+                  <button
+                    onClick={() => {
+                      const roomId = Math.random().toString(36).substring(2, 9);
+                      sessionStorage.setItem(`host_${roomId}`, 'true');
+                      window.location.href = `/watch-together/${movie.slug}/${roomId}`;
+                    }}
+                    className="inline-flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white font-medium px-5 py-2.5 rounded-lg transition-colors w-fit border border-zinc-700 active:scale-95"
+                  >
+                    <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                    </svg>
+                    Xem chung
+                  </button>
+                )}
+                {movie.slug && (
+                  <button
+                    onClick={toggleBookmark}
+                    disabled={isLoadingBookmark}
+                    className={`inline-flex items-center justify-center gap-2 font-medium px-5 py-2.5 rounded-lg transition-colors w-fit border active:scale-95 ${
+                      isBookmarked 
+                        ? 'bg-pink-500/10 border-pink-500/50 text-pink-500 hover:bg-pink-500/20 shadow-[0_0_15px_rgba(236,72,153,0.3)]' 
+                        : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700'
+                    }`}
+                  >
+                    <Heart className={`w-5 h-5 ${isBookmarked ? 'fill-current' : ''}`} />
+                    {isBookmarked ? 'Đã lưu' : 'Lưu phim'}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="hidden md:flex flex-col gap-3 w-full mt-4">
+                <div className="bg-amber-950/20 border border-amber-900/40 rounded-xl p-4 text-amber-200 text-sm max-w-xl">
+                  <p className="font-semibold mb-1 flex items-center gap-1.5 text-amber-400">
+                    <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+                    Phim chưa phát sóng chính thức
+                  </p>
+                  <p className="text-zinc-400 text-xs mt-1">Hiện tại phim chưa có tập phát sóng (chỉ có trailer/sắp chiếu). Bạn có thể thưởng thức Trailer chính thức dưới đây.</p>
+                </div>
+                {movie.trailer_url ? (
+                  <a
+                    href={movie.trailer_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white font-medium px-8 py-3 rounded-lg transition-colors w-fit active:scale-95 shadow-lg shadow-red-900/20"
+                  >
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M23.498 6.163a3.003 3.003 0 00-2.11-2.11C19.518 3.5 12 3.5 12 3.5s-7.518 0-9.388.553a3.003 3.003 0 00-2.11 2.11C0 8.033 0 12 0 12s0 3.967.502 5.837a3.003 3.003 0 002.11 2.11c1.87.553 9.388.553 9.388.553s7.518 0 9.388-.553a3.003 3.003 0 002.11-2.11C24 15.967 24 12 24 12s0-3.967-.502-5.837zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+                    </svg>
+                    Xem Trailer chính thức
+                  </a>
+                ) : (
+                  <button
+                    disabled
+                    className="inline-flex items-center justify-center gap-2 bg-zinc-800 text-zinc-500 font-medium px-8 py-3 rounded-lg w-fit cursor-not-allowed border border-zinc-700/50"
+                  >
+                    Chưa có Trailer
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          
+            {/* Description */}
+            {movie.content && (
+              <div 
+                className="text-base md:text-lg text-zinc-300 leading-relaxed md:leading-loose tracking-wide font-light bg-zinc-900/40 p-4 md:p-6 rounded-2xl border border-zinc-800/50 shadow-inner"
+                dangerouslySetInnerHTML={{ __html: movie.content }}
+              />
+            )}
+
+                        {/* Cast & Crew */}
+            {(tmdbData?.credits?.cast?.length || tmdbData?.credits?.crew?.length || movie.actor?.length || movie.director?.length) ? (
+              <div className="mt-4 mb-2">
+                <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                  <Users className="w-5 h-5 text-emerald-400" /> Đạo diễn & Diễn viên
+                </h3>
+                <div className="flex overflow-x-auto gap-3 md:gap-4 pb-4 snap-x snap-mandatory scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
+                  {[
+                    ...(tmdbData?.credits?.crew?.filter(c => c.job === 'Director').map(d => ({ id: d.id, name: d.name, profile_path: d.profile_path, role: 'Đạo diễn', isDirector: true })) || []),
+                    ...(tmdbData?.credits?.cast?.slice(0, 20).map(a => ({ id: a.id, name: a.name, profile_path: a.profile_path, role: a.character, isDirector: false })) || [])
+                  ].map((person, idx) => (
+                    <Link href={`/tim-kiem/${encodeURIComponent(person.name)}`} key={`${person.id}-${idx}`} className="flex-none w-[100px] md:w-[130px] snap-start group cursor-pointer block">
+                      <div className={`w-full aspect-[2/3] rounded-xl overflow-hidden mb-3 bg-zinc-900 border transition-all ${person.isDirector ? 'border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.15)]' : 'border-zinc-800'}`}>
+                        {person.profile_path ? (
+                          <img 
+                            src={`https://image.tmdb.org/t/p/w185${person.profile_path}`} 
+                            alt={person.name}
+                            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-zinc-700">
+                            <Users className="w-8 h-8" />
+                          </div>
+                        )}
+                        {person.isDirector && (
+                           <div className="absolute top-0 right-0 bg-emerald-500 text-black text-[9px] font-black px-2 py-1 rounded-bl-xl z-10 tracking-wider shadow-md">ĐẠO DIỄN</div>
+                        )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                      </div>
+                      <p className="text-sm font-bold text-zinc-200 line-clamp-1 group-hover:text-blue-400 transition-colors" title={person.name}>{person.name}</p>
+                      <p className={`text-xs line-clamp-1 mt-0.5 ${person.isDirector ? 'text-emerald-400 font-semibold' : 'text-zinc-500'}`} title={person.role}>{person.role}</p>
+                    </Link>
+                  ))}
+                  
+                  {/* Fallback to text if no TMDB data */}
+                  {(!tmdbData?.credits?.cast && !tmdbData?.credits?.crew) && (
+                     <div className="flex flex-col gap-2 w-full">
+                       {movie.director && movie.director.length > 0 && (
+                         <div className="flex flex-wrap gap-2">
+                           <span className="text-sm text-zinc-500 mr-2">Đạo diễn:</span>
+                           {movie.director.map((d, i) => <Link href={`/tim-kiem/${encodeURIComponent(d)}`} key={i} className="px-3 py-1 bg-zinc-800/80 hover:bg-zinc-700 rounded-full text-xs text-zinc-300 border border-zinc-700/50 transition-colors">{d}</Link>)}
+                         </div>
+                       )}
+                       {movie.actor && movie.actor.length > 0 && (
+                         <div className="flex flex-wrap gap-2 mt-2">
+                           <span className="text-sm text-zinc-500 mr-2">Diễn viên:</span>
+                           {movie.actor.slice(0,10).map((a, i) => <Link href={`/tim-kiem/${encodeURIComponent(a)}`} key={i} className="px-3 py-1 bg-zinc-800/80 hover:bg-zinc-700 rounded-full text-xs text-zinc-300 border border-zinc-700/50 transition-colors">{a}</Link>)}
+                         </div>
+                       )}
+                     </div>
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+{/* Episode Selector for Series Movies directly in Detail Page */}
+            {episodes && episodes.length > 0 && (
+              <div className="mt-8 border-t border-zinc-900 pt-6">
+                <h3 className="text-lg font-semibold text-white mb-4">
+                  {episodes[selectedServerIndex]?.server_data?.length <= 1 ? "Server nguồn / Tập" : "Danh sách tập"}
+                </h3>
+                
+                {/* Server Selection */}
+                {episodes.length > 1 && (
+                  <div className="mb-4">
+                    <div className="flex flex-wrap gap-2">
+                      {episodes.map((server, sIdx) => (
+                        <button
+                          key={sIdx}
+                          type="button"
+                          onClick={() => setSelectedServerIndex(sIdx)}
+                          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                            selectedServerIndex === sIdx
+                              ? "bg-red-600 text-white shadow-md shadow-red-900/20"
+                              : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                          }`}
+                        >
+                          {getCleanServerName(server.server_name)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Episodes selection grid */}
+                <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
+                  {episodes[selectedServerIndex]?.server_data?.map((episode: any, idx: number) => {
+                    const epKey1 = `${movie.slug}_${episode.name}`;
+                    const epKey2 = episode.link_m3u8 || episode.link_embed || episode.slug;
+                    const isCurrentlyWatching = historyItem?.currentServerIndex === selectedServerIndex && historyItem?.currentEpisodeIndex === idx;
+                    const isWatched = watchedEpisodes.has(epKey1) || watchedEpisodes.has(epKey2);
+                    return (
+                      <Link
+                        key={`${episode.slug}-${idx}`}
+                        href={`/xem-phim/${movie.slug}?tap=${idx + 1}&server=${selectedServerIndex}`}
+                        className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors text-center cursor-pointer border ${
+                          isCurrentlyWatching 
+                            ? "bg-red-600 text-white border-red-500 shadow-md shadow-red-900/20" 
+                            : isWatched
+                              ? "bg-emerald-950/30 text-emerald-400 border-emerald-500/20 hover:bg-emerald-900/40"
+                              : "bg-zinc-900 hover:bg-red-600 text-zinc-300 hover:text-white border-transparent"
+                        }`}
+                      >
+                        {episode.name}
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+          </div>
+        </div>
+
+        {/* TMDB Reviews */}
+        {tmdbData?.reviews?.results && tmdbData.reviews.results.length > 0 && (
+          <div className="mt-12 md:mt-16 border-t border-zinc-900 pt-8">
+            <h2 className="text-xl md:text-2xl font-bold text-white mb-6 flex items-center gap-2">
+              <Star className="w-6 h-6 text-yellow-400 fill-yellow-400" />
+              Đánh giá từ cộng đồng
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 pr-2">
+              {tmdbData.reviews.results.map((review) => (
+                <ReviewCard key={review.id} review={review} />
+              ))}
+            </div>
+          </div>
+        )}
+
+      </motion.div>
+    </div>
+  );
+}
+
+function ReviewCard({ review }: { review: any }) {
+  const [translatedText, setTranslatedText] = useState<string | null>(null);
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  const handleTranslate = async () => {
+    if (translatedText) {
+      setTranslatedText(null);
+      return;
+    }
+    
+    setIsTranslating(true);
+    try {
+      const res = await fetch("/api/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: review.content, targetLang: "vi" })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTranslatedText(data.translatedText);
+      }
+    } catch (e) {
+      console.error("Translation failed", e);
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
+  const displayText = translatedText ? translatedText.replace(/<[^>]*>?/gm, '') : review.content.replace(/<[^>]*>?/gm, '');
+  const shouldTruncate = displayText.length > 250;
+
+  return (
+    <div className="bg-zinc-900/40 backdrop-blur-sm border border-zinc-800/80 rounded-2xl p-6 hover:border-zinc-700/80 hover:bg-zinc-900/60 transition-all duration-300 shadow-lg hover:shadow-zinc-900/50 flex flex-col h-full">
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-full overflow-hidden bg-zinc-800 border-2 border-zinc-700/50 shadow-inner flex-shrink-0">
+            {review.author_details?.avatar_path ? (
+              <img 
+                src={review.author_details.avatar_path.startsWith('/https') 
+                  ? review.author_details.avatar_path.substring(1) 
+                  : `https://image.tmdb.org/t/p/w154${review.author_details.avatar_path}`} 
+                alt={review.author} 
+                className="w-full h-full object-cover" 
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-zinc-400 font-bold uppercase text-lg">
+                {review.author.charAt(0)}
+              </div>
+            )}
+          </div>
+          <div>
+            <h4 className="text-base font-bold text-white tracking-wide line-clamp-1">{review.author}</h4>
+            <p className="text-xs text-zinc-500 font-medium">{new Date(review.created_at).toLocaleDateString('vi-VN')}</p>
+          </div>
+        </div>
+        {review.author_details?.rating && (
+          <div className="flex items-center gap-1.5 bg-yellow-500/10 border border-yellow-500/20 px-2.5 py-1.5 rounded-xl flex-shrink-0 ml-2">
+            <Star className="w-4 h-4 text-yellow-400 fill-yellow-400 drop-shadow-md" />
+            <span className="text-sm font-bold text-yellow-400">{review.author_details.rating}.0</span>
+          </div>
+        )}
+      </div>
+      
+      <div className="flex-grow">
+        <div className={`text-base text-zinc-300 ${expanded ? '' : 'line-clamp-[6]'} leading-relaxed md:leading-loose whitespace-pre-wrap mb-2 font-light tracking-wide`}>
+          {displayText}
+        </div>
+        
+        {shouldTruncate && (
+          <button 
+            onClick={() => setExpanded(!expanded)}
+            className="text-zinc-500 hover:text-zinc-300 text-sm font-medium mb-4 transition-colors flex items-center gap-1"
+          >
+            {expanded ? "Thu gọn" : "Đọc tiếp"}
+            <svg className={`w-3.5 h-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+          </button>
+        )}
+      </div>
+      
+      <div className="mt-auto pt-4 border-t border-zinc-800/50">
+        <button 
+          onClick={handleTranslate}
+          disabled={isTranslating}
+          className="text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1.5 bg-blue-500/10 px-3 py-1.5 rounded-full hover:bg-blue-500/20 active:scale-95 w-fit"
+        >
+          {isTranslating ? (
+            <>
+              <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+              Đang dịch...
+            </>
+          ) : (
+            <>
+              <Languages className="w-3.5 h-3.5" />
+              {translatedText ? "Xem bản gốc (Tiếng Anh)" : "Dịch sang Tiếng Việt"}
+            </>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+

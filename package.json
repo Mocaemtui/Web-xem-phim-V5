@@ -1,0 +1,48 @@
+{
+  "name": "movie-hub",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "cap:sync": "npx cap sync",
+    "cap:open-android": "npx cap open android",
+    "cap:open-ios": "npx cap open ios"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.38.0",
+    "adm-zip": "^0.5.17",
+    "bcryptjs": "^3.0.3",
+    "embla-carousel-react": "^8.6.0",
+    "embla-carousel-wheel-gestures": "^8.1.0",
+    "framer-motion": "^12.40.0",
+    "hls.js": "^1.6.16",
+    "lucide-react": "^1.25.0",
+    "mongoose": "^9.7.0",
+    "next": "16.2.6",
+    "next-auth": "^4.24.14",
+    "opensubtitles-api": "^5.1.2",
+    "pusher": "^5.3.4",
+    "pusher-js": "^8.5.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "react-youtube": "^10.1.0",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.4.0",
+    "@tailwindcss/postcss": "^4.3.1",
+    "@types/adm-zip": "^0.5.8",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/web-push": "^3.6.4",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.6",
+    "tailwindcss": "^4.3.1",
+    "typescript": "^5"
+  }
+}
