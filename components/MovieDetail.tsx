@@ -187,13 +187,6 @@ export default function MovieDetail({
   }, [movie.trailer_url, tmdbData]);
   const primaryPosterUrl = getBackdropUrl(movie);
   const primaryThumbUrl = getPosterUrl(movie);
-  // Alternate URLs (from fallback/secondary API)
-  const altPosterUrl = movie.alt_poster_url
-    ? resolveImgUrl(movie.alt_poster_url)
-    : null;
-  const altThumbUrl = movie.alt_thumb_url
-    ? resolveImgUrl(movie.alt_thumb_url)
-    : null;
   // TMDB URLs
   const tmdbPosterFile = images?.images?.find(
     (img) => img.type === "poster",
@@ -217,28 +210,18 @@ export default function MovieDetail({
       ? `${tmdbBackdropBase}${tmdbBackdropFile}`
       : null;
   }
-  // Determine available options
-  const hasAltBackdrop = Boolean(
-    altPosterUrl && altPosterUrl !== primaryPosterUrl,
-  );
-  const hasAltPoster = Boolean(altThumbUrl && altThumbUrl !== primaryThumbUrl);
+  // Determine available options - chỉ PhimAPI và TMDB
   const availableBackdrops = [primaryPosterUrl];
   const backdropNames = ["PhimAPI"];
   if (tmdbBackdropUrl) {
     availableBackdrops.push(tmdbBackdropUrl);
     backdropNames.push("TMDB");
   }
-  if (movie.alt_thumb_url && movie.alt_thumb_url !== movie.thumb_url) {
-    backdropNames.push("Dự phòng");
-  }
   const availablePosters = [primaryThumbUrl];
   const posterNames = ["PhimAPI"];
   if (tmdbPosterUrl) {
     availablePosters.push(tmdbPosterUrl);
     posterNames.push("TMDB");
-  }
-  if (movie.alt_poster_url && movie.alt_poster_url !== movie.poster_url) {
-    posterNames.push("Dự phòng");
   }
   // Current active images
   const currentBackdropIndex = backdropSource % availableBackdrops.length;
