@@ -88,29 +88,40 @@ export async function fetchAPI<T>(
 }
 
 export async function getHome(): Promise<ApiResponse<HomeData> | null> {
-  const res = await fetchAPI<HomeData>("/v1/api/home");
-  if (res?.data) {
-    // Add source field to all items in all sections
-    const addSourceToItems = (items: any[]) => {
-      if (!items) return [];
-      return items.map((item: any) => ({
-        ...item,
-        source: 'phimapi'
-      }));
-    };
+  return fetchAPI<HomeData>("/v1/api/home");
+}
 
-    if (res.data.items) {
-      res.data.items = addSourceToItems(res.data.items);
+// Helper: Enrich items with TMDB data for poster/backdrop fallback
+async function enrichWithTMDB(items: any[]): Promise<void> {
+  const { searchTMDB } = await import('./tmdb');
+
+  // Collect items that need TMDB data (no poster_url or thumb_url)
+  const itemsNeedingTMDB = items.filter(item =>
+    !item.poster_url && !item.thumb_url && item.name
+  );
+
+  if (itemsNeedingTMDB.length === 0) return;
+
+  // Batch search TMDB for items without images
+  const searchPromises = itemsNeedingTMDB.map(async (item) => {
+    try {
+      const tmdbResults = await searchTMDB(item.name, 1);
+      if (tmdbResults && tmdbResults.length > 0) {
+        const tmdbMovie = tmdbResults[0];
+        item.tmdb = {
+          id: tmdbMovie.id,
+          poster_path: tmdbMovie.poster_path,
+          backdrop_path: tmdbMovie.backdrop_path,
+          vote_average: tmdbMovie.vote_average,
+          vote_count: tmdbMovie.vote_count
+        };
+      }
+    } catch (e) {
+      console.warn(`Failed to fetch TMDB for ${item.name}:`, e);
     }
-    // Also handle nested items if any
-    if (res.data.sections) {
-      res.data.sections = res.data.sections.map((section: any) => ({
-        ...section,
-        items: addSourceToItems(section.items)
-      }));
-    }
-  }
-  return res;
+  });
+
+  await Promise.all(searchPromises);
 }
 
 export async function getPhimMoi(
@@ -145,12 +156,7 @@ export async function getPhimMoi(
 
     for (const data of results) {
       if (data.status === true && data.items) {
-        // Add source field to each item
-        const itemsWithSource = data.items.map((item: any) => ({
-          ...item,
-          source: 'phimapi'
-        }));
-        allItems.push(...itemsWithSource);
+        allItems.push(...data.items);
         if (data.pagination) {
           totalItems = data.pagination.totalItems;
         }
@@ -162,6 +168,9 @@ export async function getPhimMoi(
     const slicedItems = allItems.slice(sliceStart, sliceStart + limit);
 
     if (slicedItems.length > 0) {
+      // Enrich with TMDB data for items without images
+      await enrichWithTMDB(slicedItems);
+
       return {
         status: "success",
         data: {
@@ -212,20 +221,22 @@ const DEFAULT_POSTER = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/20
 const DEFAULT_BACKDROP = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450" viewBox="0 0 800 450"><rect width="800" height="450" fill="%2318181b"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%2371717a" font-family="sans-serif" font-size="24">No Image</text></svg>';
 
 // Lấy ảnh dọc (Poster) - Ưu tiên PhimAPI (poster_url) → TMDB
-export const getPosterUrl = (movie: { thumb_url?: string; poster_url?: string; source?: string }): string => {
+export const getPosterUrl = (movie: { thumb_url?: string; poster_url?: string; source?: string; tmdb?: any }): string => {
   const isTmdb = movie.source === 'tmdb' || movie.thumb_url?.includes('tmdb.org') || movie.poster_url?.includes('tmdb.org');
-  // Detect PhimAPI by URL pattern (upload/, phimimg.com) OR source field
-  const isPhimApi = movie.source === 'phimapi' ||
-                    movie.thumb_url?.includes('upload/') ||
-                    movie.poster_url?.includes('upload/') ||
-                    movie.thumb_url?.includes('phimimg.com') ||
-                    movie.poster_url?.includes('phimimg.com');
+  const isPhimApi = movie.source === 'phimapi' || movie.thumb_url?.includes('upload/') || movie.poster_url?.includes('upload/') || movie.thumb_url?.includes('phimimg.com') || movie.poster_url?.includes('phimimg.com');
 
   // PhimAPI: dùng poster_url
-  // TMDB: dùng poster_url hoặc thumb_url
   if (isPhimApi) {
-    return resolveImgUrl(movie.poster_url || movie.thumb_url) || DEFAULT_POSTER;
+    const phimApiUrl = resolveImgUrl(movie.poster_url || movie.thumb_url);
+    if (phimApiUrl) return phimApiUrl;
+
+    // Fallback to TMDB nếu PhimAPI không có ảnh
+    if (movie.tmdb?.poster_path) {
+      return `https://image.tmdb.org/t/p/w500${movie.tmdb.poster_path}`;
+    }
   }
+
+  // TMDB: dùng poster_url hoặc thumb_url
   if (isTmdb) {
     return resolveImgUrl(movie.poster_url || movie.thumb_url) || DEFAULT_POSTER;
   }
@@ -235,15 +246,22 @@ export const getPosterUrl = (movie: { thumb_url?: string; poster_url?: string; s
 };
 
 // Lấy ảnh ngang (Backdrop) - Ưu tiên PhimAPI (thumb_url) → TMDB
-export const getBackdropUrl = (movie: { thumb_url?: string; poster_url?: string; source?: string }): string => {
+export const getBackdropUrl = (movie: { thumb_url?: string; poster_url?: string; source?: string; tmdb?: any }): string => {
   const isTmdb = movie.source === 'tmdb' || movie.thumb_url?.includes('tmdb.org') || movie.poster_url?.includes('tmdb.org');
   const isPhimApi = movie.source === 'phimapi' || movie.thumb_url?.includes('upload/') || movie.poster_url?.includes('upload/') || movie.thumb_url?.includes('phimimg.com') || movie.poster_url?.includes('phimimg.com');
 
   // PhimAPI: dùng thumb_url
-  // TMDB: dùng thumb_url hoặc poster_url
   if (isPhimApi) {
-    return resolveImgUrl(movie.thumb_url || movie.poster_url) || DEFAULT_BACKDROP;
+    const phimApiUrl = resolveImgUrl(movie.thumb_url || movie.poster_url);
+    if (phimApiUrl) return phimApiUrl;
+
+    // Fallback to TMDB nếu PhimAPI không có ảnh
+    if (movie.tmdb?.backdrop_path) {
+      return `https://image.tmdb.org/t/p/w1280${movie.tmdb.backdrop_path}`;
+    }
   }
+
+  // TMDB: dùng thumb_url hoặc poster_url
   if (isTmdb) {
     return resolveImgUrl(movie.thumb_url || movie.poster_url) || DEFAULT_BACKDROP;
   }
@@ -406,11 +424,7 @@ export async function searchPhim(
       }
     }
 
-    // Add source field to all items
-    firstPage.data.items = items.map((item: any) => ({
-      ...item,
-      source: 'phimapi'
-    }));
+    firstPage.data.items = items;
     return firstPage;
   };
 
@@ -566,11 +580,7 @@ export async function getTheLoai(): Promise<ApiResponse<{ items: Genre[] }> | nu
   } catch (e) {
     console.error(e);
   }
-  const res = await fetchAPI<{ items: Genre[] }>("/v1/api/the-loai", 3600);
-  if (res?.data?.items) {
-    res.data.items = res.data.items.map((item: any) => ({ ...item, source: 'phimapi' }));
-  }
-  return res;
+  return fetchAPI<{ items: Genre[] }>("/v1/api/the-loai", 3600);
 }
 
 export async function getQuocGia(): Promise<ApiResponse<{ items: Country[] }> | null> {
@@ -625,7 +635,14 @@ export async function getTheLoaiDetails(
   if (options.country) params.append('country', options.country);
   if (options.year) params.append('year', options.year);
   const endpoint = `/v1/api/the-loai/${slug}${params.toString() ? '?' + params.toString() : ''}`;
-  return fetchAPI<MovieListResponse>(endpoint);
+  const result = await fetchAPI<MovieListResponse>(endpoint);
+
+  // Enrich with TMDB data for items without images
+  if (result?.data?.items) {
+    await enrichWithTMDB(result.data.items);
+  }
+
+  return result;
 }
 
 // Get country details with filters
@@ -648,7 +665,14 @@ export async function getQuocGiaDetails(
   if (options.category) params.append('category', options.category);
   if (options.year) params.append('year', options.year);
   const endpoint = `/v1/api/quoc-gia/${slug}${params.toString() ? '?' + params.toString() + '&v=3' : '?v=3'}`;
-  return fetchAPI<MovieListResponse>(endpoint);
+  const result = await fetchAPI<MovieListResponse>(endpoint);
+
+  // Enrich with TMDB data for items without images
+  if (result?.data?.items) {
+    await enrichWithTMDB(result.data.items);
+  }
+
+  return result;
 }
 
 export async function getNamPhatHanh(): Promise<ApiResponse<{ items: Year[] }> | null> {
@@ -677,7 +701,14 @@ export async function getDanhSach(
   if (options.year) params.append('year', options.year);
   const query = params.toString();
   const endpoint = `/v1/api/danh-sach/${slug}${query ? '?' + query + '&v=3' : '?v=3'}`;
-  return fetchAPI<MovieListResponse>(endpoint);
+  const result = await fetchAPI<MovieListResponse>(endpoint);
+
+  // Enrich with TMDB data for items without images
+  if (result?.data?.items) {
+    await enrichWithTMDB(result.data.items);
+  }
+
+  return result;
 }
 
 
