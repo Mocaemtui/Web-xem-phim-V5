@@ -88,7 +88,29 @@ export async function fetchAPI<T>(
 }
 
 export async function getHome(): Promise<ApiResponse<HomeData> | null> {
-  return fetchAPI<HomeData>("/v1/api/home");
+  const res = await fetchAPI<HomeData>("/v1/api/home");
+  if (res?.data) {
+    // Add source field to all items in all sections
+    const addSourceToItems = (items: any[]) => {
+      if (!items) return [];
+      return items.map((item: any) => ({
+        ...item,
+        source: 'phimapi'
+      }));
+    };
+
+    if (res.data.items) {
+      res.data.items = addSourceToItems(res.data.items);
+    }
+    // Also handle nested items if any
+    if (res.data.sections) {
+      res.data.sections = res.data.sections.map((section: any) => ({
+        ...section,
+        items: addSourceToItems(section.items)
+      }));
+    }
+  }
+  return res;
 }
 
 export async function getPhimMoi(
@@ -123,7 +145,12 @@ export async function getPhimMoi(
 
     for (const data of results) {
       if (data.status === true && data.items) {
-        allItems.push(...data.items);
+        // Add source field to each item
+        const itemsWithSource = data.items.map((item: any) => ({
+          ...item,
+          source: 'phimapi'
+        }));
+        allItems.push(...itemsWithSource);
         if (data.pagination) {
           totalItems = data.pagination.totalItems;
         }
@@ -187,7 +214,12 @@ const DEFAULT_BACKDROP = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/
 // Lấy ảnh dọc (Poster) - Ưu tiên PhimAPI (poster_url) → TMDB
 export const getPosterUrl = (movie: { thumb_url?: string; poster_url?: string; source?: string }): string => {
   const isTmdb = movie.source === 'tmdb' || movie.thumb_url?.includes('tmdb.org') || movie.poster_url?.includes('tmdb.org');
-  const isPhimApi = movie.source === 'phimapi' || movie.thumb_url?.includes('upload/') || movie.poster_url?.includes('upload/') || movie.thumb_url?.includes('phimimg.com') || movie.poster_url?.includes('phimimg.com');
+  // Detect PhimAPI by URL pattern (upload/, phimimg.com) OR source field
+  const isPhimApi = movie.source === 'phimapi' ||
+                    movie.thumb_url?.includes('upload/') ||
+                    movie.poster_url?.includes('upload/') ||
+                    movie.thumb_url?.includes('phimimg.com') ||
+                    movie.poster_url?.includes('phimimg.com');
 
   // PhimAPI: dùng poster_url
   // TMDB: dùng poster_url hoặc thumb_url
@@ -374,7 +406,11 @@ export async function searchPhim(
       }
     }
 
-    firstPage.data.items = items;
+    // Add source field to all items
+    firstPage.data.items = items.map((item: any) => ({
+      ...item,
+      source: 'phimapi'
+    }));
     return firstPage;
   };
 
@@ -530,7 +566,11 @@ export async function getTheLoai(): Promise<ApiResponse<{ items: Genre[] }> | nu
   } catch (e) {
     console.error(e);
   }
-  return fetchAPI<{ items: Genre[] }>("/v1/api/the-loai", 3600);
+  const res = await fetchAPI<{ items: Genre[] }>("/v1/api/the-loai", 3600);
+  if (res?.data?.items) {
+    res.data.items = res.data.items.map((item: any) => ({ ...item, source: 'phimapi' }));
+  }
+  return res;
 }
 
 export async function getQuocGia(): Promise<ApiResponse<{ items: Country[] }> | null> {
