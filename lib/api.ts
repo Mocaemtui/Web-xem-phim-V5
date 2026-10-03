@@ -91,39 +91,6 @@ export async function getHome(): Promise<ApiResponse<HomeData> | null> {
   return fetchAPI<HomeData>("/v1/api/home");
 }
 
-// Helper: Enrich items with TMDB data for poster/backdrop fallback
-async function enrichWithTMDB(items: any[]): Promise<void> {
-  const { searchTMDB } = await import('./tmdb');
-
-  // Collect items that need TMDB data (no poster_url or thumb_url)
-  const itemsNeedingTMDB = items.filter(item =>
-    !item.poster_url && !item.thumb_url && item.name
-  );
-
-  if (itemsNeedingTMDB.length === 0) return;
-
-  // Batch search TMDB for items without images
-  const searchPromises = itemsNeedingTMDB.map(async (item) => {
-    try {
-      const tmdbResults = await searchTMDB(item.name, 1);
-      if (tmdbResults && tmdbResults.length > 0) {
-        const tmdbMovie = tmdbResults[0];
-        item.tmdb = {
-          id: tmdbMovie.id,
-          poster_path: tmdbMovie.poster_path,
-          backdrop_path: tmdbMovie.backdrop_path,
-          vote_average: tmdbMovie.vote_average,
-          vote_count: tmdbMovie.vote_count
-        };
-      }
-    } catch (e) {
-      console.warn(`Failed to fetch TMDB for ${item.name}:`, e);
-    }
-  });
-
-  await Promise.all(searchPromises);
-}
-
 export async function getPhimMoi(
   page: number = 1,
   limit: number = 20
@@ -168,9 +135,6 @@ export async function getPhimMoi(
     const slicedItems = allItems.slice(sliceStart, sliceStart + limit);
 
     if (slicedItems.length > 0) {
-      // Enrich with TMDB data for items without images
-      await enrichWithTMDB(slicedItems);
-
       return {
         status: "success",
         data: {
@@ -223,12 +187,17 @@ const DEFAULT_BACKDROP = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/
 // Lấy ảnh dọc (Poster) - Ưu tiên PhimAPI (poster_url) → TMDB
 export const getPosterUrl = (movie: { thumb_url?: string; poster_url?: string; source?: string; tmdb?: any }): string => {
   const isTmdb = movie.source === 'tmdb' || movie.thumb_url?.includes('tmdb.org') || movie.poster_url?.includes('tmdb.org');
-  const isPhimApi = movie.source === 'phimapi' || movie.thumb_url?.includes('upload/') || movie.poster_url?.includes('upload/') || movie.thumb_url?.includes('phimimg.com') || movie.poster_url?.includes('phimimg.com');
+  const isPhimApi = movie.source === 'phimapi' ||
+                    movie.thumb_url?.includes('upload/') ||
+                    movie.poster_url?.includes('upload/') ||
+                    movie.thumb_url?.includes('phimimg.com') ||
+                    movie.poster_url?.includes('phimimg.com') ||
+                    (!movie.source && (movie.poster_url?.includes('upload/') || movie.thumb_url?.includes('upload/'))); // Auto-detect PhimAPI by URL pattern
 
   // PhimAPI: dùng poster_url
   if (isPhimApi) {
-    const phimApiUrl = resolveImgUrl(movie.poster_url || movie.thumb_url);
-    if (phimApiUrl) return phimApiUrl;
+    const url = resolveImgUrl(movie.poster_url || movie.thumb_url);
+    if (url) return url;
 
     // Fallback to TMDB nếu PhimAPI không có ảnh
     if (movie.tmdb?.poster_path) {
@@ -246,19 +215,19 @@ export const getPosterUrl = (movie: { thumb_url?: string; poster_url?: string; s
 };
 
 // Lấy ảnh ngang (Backdrop) - Ưu tiên PhimAPI (thumb_url) → TMDB
-export const getBackdropUrl = (movie: { thumb_url?: string; poster_url?: string; source?: string; tmdb?: any }): string => {
+export const getBackdropUrl = (movie: { thumb_url?: string; poster_url?: string; source?: string }): string => {
   const isTmdb = movie.source === 'tmdb' || movie.thumb_url?.includes('tmdb.org') || movie.poster_url?.includes('tmdb.org');
-  const isPhimApi = movie.source === 'phimapi' || movie.thumb_url?.includes('upload/') || movie.poster_url?.includes('upload/') || movie.thumb_url?.includes('phimimg.com') || movie.poster_url?.includes('phimimg.com');
+  const isPhimApi = movie.source === 'phimapi' ||
+                    movie.thumb_url?.includes('upload/') ||
+                    movie.poster_url?.includes('upload/') ||
+                    movie.thumb_url?.includes('phimimg.com') ||
+                    movie.poster_url?.includes('phimimg.com') ||
+                    (!movie.source && (movie.poster_url?.includes('upload/') || movie.thumb_url?.includes('upload/'))); // Auto-detect PhimAPI by URL pattern
 
   // PhimAPI: dùng thumb_url
   if (isPhimApi) {
-    const phimApiUrl = resolveImgUrl(movie.thumb_url || movie.poster_url);
-    if (phimApiUrl) return phimApiUrl;
-
-    // Fallback to TMDB nếu PhimAPI không có ảnh
-    if (movie.tmdb?.backdrop_path) {
-      return `https://image.tmdb.org/t/p/w1280${movie.tmdb.backdrop_path}`;
-    }
+    const url = resolveImgUrl(movie.thumb_url || movie.poster_url);
+    if (url) return url;
   }
 
   // TMDB: dùng thumb_url hoặc poster_url
@@ -635,14 +604,7 @@ export async function getTheLoaiDetails(
   if (options.country) params.append('country', options.country);
   if (options.year) params.append('year', options.year);
   const endpoint = `/v1/api/the-loai/${slug}${params.toString() ? '?' + params.toString() : ''}`;
-  const result = await fetchAPI<MovieListResponse>(endpoint);
-
-  // Enrich with TMDB data for items without images
-  if (result?.data?.items) {
-    await enrichWithTMDB(result.data.items);
-  }
-
-  return result;
+  return fetchAPI<MovieListResponse>(endpoint);
 }
 
 // Get country details with filters
@@ -665,14 +627,7 @@ export async function getQuocGiaDetails(
   if (options.category) params.append('category', options.category);
   if (options.year) params.append('year', options.year);
   const endpoint = `/v1/api/quoc-gia/${slug}${params.toString() ? '?' + params.toString() + '&v=3' : '?v=3'}`;
-  const result = await fetchAPI<MovieListResponse>(endpoint);
-
-  // Enrich with TMDB data for items without images
-  if (result?.data?.items) {
-    await enrichWithTMDB(result.data.items);
-  }
-
-  return result;
+  return fetchAPI<MovieListResponse>(endpoint);
 }
 
 export async function getNamPhatHanh(): Promise<ApiResponse<{ items: Year[] }> | null> {
@@ -701,14 +656,7 @@ export async function getDanhSach(
   if (options.year) params.append('year', options.year);
   const query = params.toString();
   const endpoint = `/v1/api/danh-sach/${slug}${query ? '?' + query + '&v=3' : '?v=3'}`;
-  const result = await fetchAPI<MovieListResponse>(endpoint);
-
-  // Enrich with TMDB data for items without images
-  if (result?.data?.items) {
-    await enrichWithTMDB(result.data.items);
-  }
-
-  return result;
+  return fetchAPI<MovieListResponse>(endpoint);
 }
 
 
