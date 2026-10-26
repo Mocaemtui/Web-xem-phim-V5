@@ -71,6 +71,10 @@ export async function getQuocGia(): Promise<{ items: Country[] }> {
   return data.data || data;
 }
 
+export async function getQuocGiaDetails(slug: string, page: number = 1): Promise<MovieListResponse> {
+  return getPhimByQuocGia(slug, page);
+}
+
 export async function getPhimByTheLoai(slug: string, page: number = 1): Promise<MovieListResponse> {
   const data = await fetchAPI(`/the-loai/${slug}?page=${page}`);
   return data.data || data;
@@ -79,6 +83,10 @@ export async function getPhimByTheLoai(slug: string, page: number = 1): Promise<
 export async function getTheLoai(): Promise<{ items: Genre[] }> {
   const data = await fetchAPI('/the-loai');
   return data.data || data;
+}
+
+export async function getTheLoaiDetails(slug: string, page: number = 1): Promise<MovieListResponse> {
+  return getPhimByTheLoai(slug, page);
 }
 
 export async function searchPhim(keyword: string, page: number = 1): Promise<MovieListResponse> {
