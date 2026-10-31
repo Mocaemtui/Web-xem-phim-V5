@@ -490,10 +490,13 @@ export default function WatchPageClient({ movie, posterUrl, tmdbData, seasonData
   if (currentServerName === "VidLink Anime (Chuẩn MAL)" && malAnimeUrl) {
     finalEmbedUrl = malAnimeUrl;
   }
-  
+
+  // Don't use proxy for nguonc embeds - let them load directly
+  // Proxy may cause issues with streamc.xyz domains
+
   if (finalEmbedUrl) {
     const separator = finalEmbedUrl.includes('?') ? '&' : '?';
-    
+
     if (currentServerName?.toLowerCase().includes("vidlink")) {
       if (subtitlesData.length > 0) {
         const firstSub = subtitlesData[0];

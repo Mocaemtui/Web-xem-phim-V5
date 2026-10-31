@@ -845,9 +845,10 @@ export default function VideoPlayer({
               src={embedUrl}
               className="w-full h-full rounded-lg"
               allowFullScreen
-              allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
-              referrerPolicy="no-referrer"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allowfullscreen"
+              allow="autoplay; encrypted-media; fullscreen; picture-in-picture; clipboard-write"
+              referrerPolicy="no-referrer-when-downgrade"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allowfullscreen allow-popups allow-popups-to-escape-sandbox"
+              loading="eager"
             />
           )
         ) : (
