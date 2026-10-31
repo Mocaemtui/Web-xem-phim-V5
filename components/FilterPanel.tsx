@@ -4,13 +4,21 @@ import { useState, useEffect } from "react";
 import { X, SlidersHorizontal, ChevronUp, Filter } from "lucide-react";
 import type { Genre, Country } from "@/types/api";
 
-const NAM_PHAT_HANH = Array.from({ length: 30 }, (_, i) => 2024 - i);
+const NAM_PHAT_HANH = Array.from({ length: 30 }, (_, i) => 2024 - i).map(year => ({ name: year.toString(), slug: year.toString() }));
 
-const LOAI_PHIM_LIST = [
-  { name: "Phim lẻ", slug: "phim-le" },
-  { name: "Phim bộ", slug: "phim-bo" },
-  { name: "TV Shows", slug: "tv-shows" },
-  { name: "Hoạt Hình", slug: "hoat-hinh" }
+const DANH_SACH_LIST = [
+  { name: "Phim Mới", slug: "phim-moi" },
+  { name: "Phim Bộ", slug: "phim-bo" },
+  { name: "Phim Lẻ", slug: "phim-le" },
+  { name: "Shows", slug: "tv-shows" },
+  { name: "Hoạt Hình", slug: "hoat-hinh" },
+  { name: "Phim Vietsub", slug: "phim-vietsub" },
+  { name: "Phim Thuyết Minh", slug: "phim-thuyet-minh" },
+  { name: "Phim Lồng Tiếng", slug: "phim-long-tieng" },
+  { name: "Phim Bộ Đang Chiếu", slug: "phim-bo-dang-chieu" },
+  { name: "Phim Bộ Đã Hoàn Thành", slug: "phim-bo-hoan-thanh" },
+  { name: "Subteam", slug: "subteam" },
+  { name: "Phim Chiếu Rạp", slug: "phim-chieu-rap" }
 ];
 
 const PHIEN_BAN_LIST = [
@@ -34,6 +42,7 @@ interface FilterPanelProps {
     year?: string;
     loaiPhim?: string;
     phienBan?: string;
+    danhSach?: string;
     sortField?: string;
   };
   onFilterChange: (filters: {
@@ -42,6 +51,7 @@ interface FilterPanelProps {
     year?: string;
     loaiPhim?: string;
     phienBan?: string;
+    danhSach?: string;
     sortField?: string;
   }) => void;
 }
@@ -53,6 +63,7 @@ export default function FilterPanel({ theLoaiList, quocGiaList, initialFilters, 
     year?: string;
     loaiPhim?: string;
     phienBan?: string;
+    danhSach?: string;
     sortField?: string;
   }>({});
   const [isMobileOpen, setIsMobileOpen] = useState(false);
@@ -68,6 +79,7 @@ export default function FilterPanel({ theLoaiList, quocGiaList, initialFilters, 
     initialFilters?.year,
     initialFilters?.loaiPhim,
     initialFilters?.phienBan,
+    initialFilters?.danhSach,
     initialFilters?.sortField
   ]);
 
@@ -88,6 +100,7 @@ export default function FilterPanel({ theLoaiList, quocGiaList, initialFilters, 
       year: newFilters.year,
       loaiPhim: newFilters.loaiPhim,
       phienBan: newFilters.phienBan,
+      danhSach: newFilters.danhSach,
       sortField: newFilters.sortField,
     });
   };
@@ -179,10 +192,11 @@ export default function FilterPanel({ theLoaiList, quocGiaList, initialFilters, 
           isMobileOpen ? "block" : "hidden"
         } ${isDesktopOpen ? "lg:block" : "lg:hidden"}`}
       >
+        {renderFilterGroup("Danh sách", "danhSach", DANH_SACH_LIST)}
         {renderFilterGroup("Quốc gia", "quocGiaSlug", quocGiaList)}
-        {renderFilterGroup("Loại phim", "loaiPhim", LOAI_PHIM_LIST)}
         {renderFilterGroup("Thể loại", "theLoaiSlug", theLoaiList)}
         {renderFilterGroup("Phiên bản", "phienBan", PHIEN_BAN_LIST)}
+        {renderFilterGroup("Năm phát hành", "year", NAM_PHAT_HANH)}
         {renderFilterGroup("Sắp xếp", "sortField", SAP_XEP_LIST)}
 
       </div>

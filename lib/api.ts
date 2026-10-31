@@ -625,34 +625,17 @@ export async function searchPhim(
 
 
 export async function getTheLoai(): Promise<ApiResponse<{ items: Genre[] }> | null> {
-  if (PRIMARY_SOURCE.id === 'phimapi') {
-    try {
-      const res = await fetch(`https://phimapi.com/the-loai`, { next: { revalidate: 3600 } });
-      if (res.ok) {
-        const items = await res.json();
-        // Lọc bỏ danh mục Phim 18+
-        const filteredItems = items.filter((item: Genre) => item.slug !== 'phim-18');
-        return { status: "success", data: { items: filteredItems } } as any;
-      }
-    } catch (e) {
-      console.error(e);
-    }
+  // Luôn dùng API gốc từ ophim/phimapi V1
+  const res = await fetchAPI<{ items: Genre[] }>("/v1/api/the-loai", 3600);
+  if (res?.data?.items) {
+    const filtered = res.data.items.filter(item => !item.name.toLowerCase().includes('18+') && !item.name.toLowerCase().includes('18'));
+    return { status: "success", data: { items: filtered } };
   }
-  return fetchAPI<{ items: Genre[] }>("/v1/api/the-loai", 3600);
+  return res;
 }
 
 export async function getQuocGia(): Promise<ApiResponse<{ items: Country[] }> | null> {
-  if (PRIMARY_SOURCE.id === 'phimapi') {
-    try {
-      const res = await fetch(`https://phimapi.com/quoc-gia`, { next: { revalidate: 3600 } });
-      if (res.ok) {
-        const items = await res.json();
-        return { status: "success", data: { items } } as any;
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  }
+  // Luôn dùng API gốc từ ophim/phimapi V1
   return fetchAPI<{ items: Country[] }>("/v1/api/quoc-gia", 3600);
 }
 

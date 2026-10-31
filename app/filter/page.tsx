@@ -42,7 +42,7 @@ function FilterContent() {
   const [movies, setMovies] = useState<MovieListResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [filters, setFilters] = useState<{ theLoai?: string; quocGia?: string; year?: string; loaiPhim?: string; phienBan?: string; sortField?: string }>({});
+  const [filters, setFilters] = useState<{ theLoai?: string; quocGia?: string; year?: string; loaiPhim?: string; phienBan?: string; danhSach?: string; sortField?: string }>({});
   const [title, setTitle] = useState("Bộ Lọc Phim");
   const [theLoaiList, setTheLoaiList] = useState<Genre[]>([]);
   const [quocGiaList, setQuocGiaList] = useState<Country[]>([]);
@@ -70,13 +70,13 @@ function FilterContent() {
     setLoading(true);
     try {
       let data: MovieListResponse | null = null;
-      const danhMucSlug = filters.loaiPhim || filters.phienBan || "phim-moi";
-      
-      const queryParams: any = { 
-        page, 
-        limit: 30, 
-        category: filters.theLoai, 
-        country: filters.quocGia, 
+      const danhMucSlug = filters.danhSach || filters.loaiPhim || filters.phienBan || "phim-moi";
+
+      const queryParams: any = {
+        page,
+        limit: 30,
+        category: filters.theLoai,
+        country: filters.quocGia,
         year: filters.year,
         sort_field: filters.sortField,
         sort_type: filters.sortField ? "desc" : undefined
@@ -84,7 +84,7 @@ function FilterContent() {
 
       const hasAnyFilter = filters.theLoai || filters.quocGia || filters.year || filters.sortField;
 
-      if (filters.loaiPhim || filters.phienBan) {
+      if (filters.danhSach || filters.loaiPhim || filters.phienBan) {
         if (danhMucSlug === "phim-moi" && !hasAnyFilter) {
           const res = await getPhimMoi(page, 30);
           if (fetchId !== fetchIdRef.current) return;
@@ -127,11 +127,22 @@ function FilterContent() {
   const fetchFilterData = useCallback(async () => {
     try {
       const [theLoaiRes, quocGiaRes] = await Promise.all([getTheLoai(), getQuocGia()]);
+      console.log("TheLoai response:", theLoaiRes);
+      console.log("QuocGia response:", quocGiaRes);
+
       if (theLoaiRes?.data?.items) {
         const filtered = theLoaiRes.data.items.filter(item => !item.name.toLowerCase().includes('18+') && !item.name.toLowerCase().includes('18'));
+        console.log("Filtered theLoai:", filtered);
         setTheLoaiList(filtered);
+      } else {
+        console.warn("No theLoai items found");
       }
-      if (quocGiaRes?.data?.items) setQuocGiaList(quocGiaRes.data.items);
+      if (quocGiaRes?.data?.items) {
+        console.log("QuocGia items:", quocGiaRes.data.items);
+        setQuocGiaList(quocGiaRes.data.items);
+      } else {
+        console.warn("No quocGia items found");
+      }
     } catch (e) {
       console.error("Error fetching filter data:", e);
     }
@@ -143,26 +154,29 @@ function FilterContent() {
     const year = searchParams.get("year") || undefined;
     const loaiPhim = searchParams.get("loaiPhim") || undefined;
     const phienBan = searchParams.get("phienBan") || undefined;
+    const danhSach = searchParams.get("danhSach") || undefined;
     const sortField = searchParams.get("sortField") || undefined;
-    setFilters({ theLoai, quocGia, year, loaiPhim, phienBan, sortField });
+    setFilters({ theLoai, quocGia, year, loaiPhim, phienBan, danhSach, sortField });
   }, [
     searchParams.get("theLoai"),
     searchParams.get("quocGia"),
     searchParams.get("year"),
     searchParams.get("loaiPhim"),
     searchParams.get("phienBan"),
+    searchParams.get("danhSach"),
     searchParams.get("sortField")
   ]);
 
-  const handleFilterChange = (newFilters: { theLoai?: string; quocGia?: string; year?: string; loaiPhim?: string; phienBan?: string; sortField?: string }) => {
+  const handleFilterChange = (newFilters: { theLoai?: string; quocGia?: string; year?: string; loaiPhim?: string; phienBan?: string; danhSach?: string; sortField?: string }) => {
     const params = new URLSearchParams();
     if (newFilters.theLoai) params.set("theLoai", newFilters.theLoai);
     if (newFilters.quocGia) params.set("quocGia", newFilters.quocGia);
     if (newFilters.year) params.set("year", newFilters.year);
     if (newFilters.loaiPhim) params.set("loaiPhim", newFilters.loaiPhim);
     if (newFilters.phienBan) params.set("phienBan", newFilters.phienBan);
+    if (newFilters.danhSach) params.set("danhSach", newFilters.danhSach);
     if (newFilters.sortField) params.set("sortField", newFilters.sortField);
-    
+
     setFilters(newFilters);
     const queryString = params.toString();
     router.push(queryString ? `/filter?${queryString}` : "/filter", { scroll: false });
@@ -213,6 +227,7 @@ function FilterContent() {
             year: filters.year,
             loaiPhim: filters.loaiPhim,
             phienBan: filters.phienBan,
+            danhSach: filters.danhSach,
             sortField: filters.sortField
           }}
           onFilterChange={handleFilterChange}
